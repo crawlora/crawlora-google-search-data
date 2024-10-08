@@ -1,3 +1,9 @@
 import GetGoogleLinks from "./index";
 
-GetGoogleLinks({ searches: `crawlora\nscaletech` });
+async function main() {
+  const data = await GetGoogleLinks({
+    searches: "Stock market",
+  });
+}
+
+main();

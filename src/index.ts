@@ -1,59 +1,89 @@
-import { apikey, sequence_id, showBrowser } from "./config";
-
+import { sequence_id, auth_key } from "./config";
 import { browser } from "@crawlora/browser";
 
-export default async function ({
-  searches, // data coming from textarea which means it is multiline
+export default async function GetGoogleLinks({
+  searches,
 }: {
   searches: string;
-}) {
+}): Promise<void> {
+  const formedData = searches
+    .trim()
+    .split("\n")
+    .map((v) => v.trim());
 
-  const formedData = searches.trim().split("\n").map(v => v.trim())
+  await browser(
+    async ({ page, wait, debug, output }) => {
+      const csvData: {
+        searchQuery: string;
+        resultNumber: number;
+        title: string;
+        link: string;
+        description: string;
+      }[] = [];
 
- await browser(async ({page, wait, output, debug }) => {
+      for await (const searchQuery of formedData) {
+        try {
+          await page.goto("https://google.com");
+          debug(`Visiting Google for search: "${searchQuery}"`);
 
-    for await (const searchs of formedData) {
+          await wait(2);
 
-      await page.goto("https://google.com");
+          await page.type('textarea[name="q"]', searchQuery);
+          await page.keyboard.press("Enter");
+          await page.waitForNavigation({ waitUntil: "networkidle2" });
 
-      debug(`visiting google website`)
-  
-      await wait(2);
-  
-      await page.type('textarea[name="q"]', searchs);
+          const allResults = await page.evaluate(() => {
+            const items = [...document.querySelectorAll("div.g")];
+            return items.map((item) => {
+              const title = item.querySelector("h3")?.innerText || "No title";
+              const link = item.querySelector("a")?.href || "No link";
+              const description =
+                (item.querySelector("div.IsZvec") as HTMLElement)?.innerText ||
+                (item.querySelector("div[data-sncf='1']") as HTMLElement)
+                  ?.innerText ||
+                (item.querySelector("div[data-snf='nke7rc']") as HTMLElement)
+                  ?.innerText ||
+                "no description";
 
-      debug(`looking for textarea to type`)
+              return {
+                title,
+                link,
+                description,
+              };
+            });
+          });
 
-  
-      await page.keyboard.press("Enter");
+          await wait(2);
 
-      debug(`pressing enter`)
+          allResults.forEach((result, index) => {
+            csvData.push({
+              searchQuery,
+              resultNumber: index + 1,
+              title: result.title,
+              link: result.link,
+              description: result.description,
+            });
+          });
+        } catch (error) {
+          debug(`Error fetching results for "${searchQuery}":`);
+        }
+      }
 
-  
-      await page.waitForNavigation({ waitUntil: ["networkidle2"] });
-
-      debug(`waiting for page navigation`)
-
-  
-      const links = await page.$$eval("a", (anchors) =>
-        anchors.map((anchor) => anchor.href)
+      await Promise.all(
+        csvData.map(async (entry) => {
+          await output.create({
+            sequence_id,
+            sequence_output: entry,
+          });
+        })
       );
 
-      debug(`fetching links`)
-
-
-      await wait(2);
-
-      debug(`started submitting links`)
-
-      await Promise.all(links.map(async (link) => {
-        await output.create({sequence_id, sequence_output: { [searchs]: link }}) // save data per line
-      }))
-      
-      debug(`submitted links`)
-
+      debug(
+        "Final CSV-formatted data: ");
+    },
+    {
+      apikey: auth_key,
+      showBrowser: true,
     }
-
-  }, { showBrowser, apikey })
-
+  );
 }
